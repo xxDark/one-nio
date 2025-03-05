@@ -173,7 +173,7 @@ public class BytecodeGenerator extends ClassLoader implements BytecodeGeneratorM
     }
 
     public static void emitPutField(MethodVisitor mv, Field f) {
-	    int opcode = (f.getModifiers() & Modifier.STATIC) != 0 ? PUTSTATIC : PUTFIELD;
+        int opcode = (f.getModifiers() & Modifier.STATIC) != 0 ? PUTSTATIC : PUTFIELD;
         String holder = Type.getInternalName(f.getDeclaringClass());
         String name = f.getName();
         String sig = Type.getDescriptor(f.getType());

@@ -148,15 +148,7 @@ public class DelegateGenerator extends BytecodeGenerator {
         generateFromJson(cv, cls, fds, defaultFields, className);
 
         cv.visitEnd();
-        byte[] bytes = cv.toByteArray();
-        if ("sun/reflect/Delegate0_Place".equals(className)) {
-            try {
-                Files.write(Paths.get("F:\\Test.class"), bytes);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-        return bytes;
+	    return cv.toByteArray();
     }
 
     private static void generateConstructor(ClassVisitor cv, String className) {
