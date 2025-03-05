@@ -31,6 +31,8 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicInteger;
 import one.nio.mgt.Management;
+import one.nio.serial.gen.MagicAccessor;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
@@ -41,6 +43,7 @@ public class BytecodeGenerator extends ClassLoader implements BytecodeGeneratorM
     private static final Logger log = LoggerFactory.getLogger(BytecodeGenerator.class);
 
     public static final BytecodeGenerator INSTANCE = new BytecodeGenerator();
+    protected static final boolean USE_INVOKE_DYNAMIC = MagicAccessor.useInvokeDynamic();
 
     static {
         Management.registerMXBean(INSTANCE, "one.nio.gen:type=BytecodeGenerator");
@@ -59,6 +62,18 @@ public class BytecodeGenerator extends ClassLoader implements BytecodeGeneratorM
         this.totalClasses = new AtomicInteger();
         this.totalBytes = new AtomicInteger();
         this.dumpPath = System.getProperty("one.nio.gen.dump");
+    }
+
+    public Class<?> defineClassIn(Class<?> host, byte[] classData) {
+        Class<?> c = GenBootstraps.defineHiddenClass(
+                GenBootstraps.lookupFor(host),
+                host,
+                classData
+        );
+        if (c == null) {
+            c= defineClass(classData);
+        }
+        return c;
     }
 
     public Class<?> defineClass(byte[] classData) {
@@ -96,29 +111,112 @@ public class BytecodeGenerator extends ClassLoader implements BytecodeGeneratorM
         }
     }
 
+    private static boolean isAccessible(Field f) {
+        // pessimistic check
+	    if ((f.getModifiers() & Modifier.PUBLIC) == 0) return false;
+        return (f.getDeclaringClass().getModifiers() & Modifier.PUBLIC) != 0;
+    }
+
+    public static void emitNewNoInit(MethodVisitor mv, Class<?> c) {
+        if (USE_INVOKE_DYNAMIC) {
+            mv.visitInvokeDynamicInsn(
+                    "_",
+                    Type.getMethodDescriptor(Type.getType(c)),
+                    new Handle(
+                            H_INVOKESTATIC,
+                            "one/nio/gen/GenBootstraps",
+                            "new_",
+                            "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+                            false
+                    )
+            );
+        } else {
+            mv.visitTypeInsn(NEW, Type.getInternalName(c));
+        }
+    }
+
     public static void emitGetField(MethodVisitor mv, Field f) {
         int opcode = (f.getModifiers() & Modifier.STATIC) != 0 ? GETSTATIC : GETFIELD;
         String holder = Type.getInternalName(f.getDeclaringClass());
         String name = f.getName();
         String sig = Type.getDescriptor(f.getType());
-        mv.visitFieldInsn(opcode, holder, name, sig);
+        if (!isAccessible(f) && USE_INVOKE_DYNAMIC) {
+            if (opcode == GETSTATIC) {
+                mv.visitInvokeDynamicInsn(
+                        name,
+                        Type.getMethodDescriptor(Type.getType(f.getType()), Type.getType(f.getType())),
+                        new Handle(
+                                H_INVOKESTATIC,
+                                "one/nio/gen/GenBootstraps",
+                                "getstatic",
+                                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)Ljava/lang/invoke/CallSite;",
+                                false
+                        ),
+                        Type.getType(f.getDeclaringClass())
+                );
+            } else {
+                mv.visitInvokeDynamicInsn(
+                        name,
+                        Type.getMethodDescriptor(Type.getType(f.getType()), Type.getType(f.getDeclaringClass())),
+                        new Handle(
+                                H_INVOKESTATIC,
+                                "one/nio/gen/GenBootstraps",
+                                "getfield",
+                                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+                                false
+                        )
+                );
+            }
+        } else {
+            mv.visitFieldInsn(opcode, holder, name, sig);
+        }
     }
 
     public static void emitPutField(MethodVisitor mv, Field f) {
-        int opcode = (f.getModifiers() & Modifier.STATIC) != 0 ? PUTSTATIC : PUTFIELD;
+	    int opcode = (f.getModifiers() & Modifier.STATIC) != 0 ? PUTSTATIC : PUTFIELD;
         String holder = Type.getInternalName(f.getDeclaringClass());
         String name = f.getName();
         String sig = Type.getDescriptor(f.getType());
-        mv.visitFieldInsn(opcode, holder, name, sig);
+        if (!isAccessible(f) && USE_INVOKE_DYNAMIC) {
+            if (opcode == PUTSTATIC) {
+                mv.visitInvokeDynamicInsn(
+                        name,
+                        Type.getMethodDescriptor(Type.VOID_TYPE, Type.getType(f.getType())),
+                        new Handle(
+                                H_INVOKESTATIC,
+                                "one/nio/gen/GenBootstraps",
+                                "putstatic",
+                                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)Ljava/lang/invoke/CallSite;",
+                                false
+                        ),
+                        Type.getType(f.getDeclaringClass())
+                );
+            } else {
+                mv.visitInvokeDynamicInsn(
+                        name,
+                        Type.getMethodDescriptor(Type.VOID_TYPE, Type.getType(f.getDeclaringClass()), Type.getType(f.getType())),
+                        new Handle(
+                                H_INVOKESTATIC,
+                                "one/nio/gen/GenBootstraps",
+                                "putfield",
+                                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+                                false
+                        )
+                );
+            }
+        } else {
+            mv.visitFieldInsn(opcode, holder, name, sig);
+        }
     }
 
     public static void emitInvoke(MethodVisitor mv, Method m) {
         int opcode;
+        boolean itf = m.getDeclaringClass().isInterface();
         if ((m.getModifiers() & Modifier.STATIC) != 0) {
             opcode = INVOKESTATIC;
         } else if ((m.getModifiers() & Modifier.PRIVATE) != 0) {
             opcode = INVOKESPECIAL;
-        } else if (m.getDeclaringClass().isInterface()) {
+        } else if (itf) {
             opcode = INVOKEINTERFACE;
         } else {
             opcode = INVOKEVIRTUAL;
@@ -127,7 +225,7 @@ public class BytecodeGenerator extends ClassLoader implements BytecodeGeneratorM
         String holder = Type.getInternalName(m.getDeclaringClass());
         String name = m.getName();
         String sig = Type.getMethodDescriptor(m);
-        mv.visitMethodInsn(opcode, holder, name, sig, opcode == INVOKEINTERFACE);
+        mv.visitMethodInsn(opcode, holder, name, sig, itf);
     }
 
     public static void emitInvoke(MethodVisitor mv, MethodHandleInfo m) {

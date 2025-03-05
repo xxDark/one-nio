@@ -85,7 +85,7 @@ public class DateFormatGenerator extends BytecodeGenerator {
         String className = "one/nio/util/GeneratedDateFormat" + index.getAndIncrement();
 
         ClassWriter cv = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
-        cv.visit(V1_6, ACC_PUBLIC | ACC_FINAL, className, null, "one/nio/util/DateFormat", new String[0]);
+        cv.visit(V1_8, ACC_PUBLIC | ACC_FINAL, className, null, "one/nio/util/DateFormat", new String[0]);
 
         cv.visitField(ACC_PRIVATE | ACC_STATIC | ACC_FINAL, "tz", "Ljava/util/TimeZone;", null, null).visitEnd();
 

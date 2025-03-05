@@ -36,7 +36,7 @@ public class StubGenerator extends BytecodeGenerator {
         String internalClassName = getStubName(className);
 
         ClassWriter cv = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
-        cv.visit(V1_6, ACC_PUBLIC | ACC_FINAL, internalClassName, null, superName,
+        cv.visit(V1_8, ACC_PUBLIC | ACC_FINAL, internalClassName, null, superName,
                 new String[] { "java/io/Serializable" });
 
         MethodVisitor mv = cv.visitMethod(ACC_PUBLIC, "<init>", "()V", null, null);
@@ -83,7 +83,7 @@ public class StubGenerator extends BytecodeGenerator {
         String internalClassName = getStubName(className);
 
         ClassWriter cv = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
-        cv.visit(V1_6, ACC_PUBLIC | ACC_FINAL | ACC_ENUM, internalClassName, null, "java/lang/Enum", null);
+        cv.visit(V1_8, ACC_PUBLIC | ACC_FINAL | ACC_ENUM, internalClassName, null, "java/lang/Enum", null);
 
         String classDesc = 'L' + internalClassName + ';';
         for (String c : constants) {

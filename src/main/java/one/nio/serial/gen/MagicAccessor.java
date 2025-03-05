@@ -49,9 +49,22 @@ public class MagicAccessor {
         return majorVersion >= 22;
     }
 
+    public static boolean useInvokeDynamic() {
+        if (true) return true;
+        String javaVersion = System.getProperty("java.version");
+        final int indexOfDot = javaVersion.indexOf(".");
+
+        if (indexOfDot > 0) {
+            javaVersion = javaVersion.substring(0, indexOfDot);
+        }
+
+        int majorVersion = Integer.parseInt(javaVersion);
+        return majorVersion >= 24;
+    }
+
     private static byte[] generateClass(String name, String superClass) {
         ClassWriter cv = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
-        cv.visit(Opcodes.V1_6, Opcodes.ACC_PUBLIC, name, null, superClass, new String[]{});
+        cv.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC, name, null, superClass, new String[]{});
         MethodVisitor mv = cv.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
         mv.visitCode();
 

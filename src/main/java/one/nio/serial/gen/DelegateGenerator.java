@@ -29,10 +29,12 @@ import one.nio.util.MethodHandlesReflection;
 
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Type;
 
+import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.lang.invoke.MethodHandleInfo;
@@ -41,6 +43,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.ProtectionDomain;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -58,7 +63,7 @@ public class DelegateGenerator extends BytecodeGenerator {
     private static final AtomicInteger index = new AtomicInteger();
 
     // Allows to bypass security checks when accessing private members of other classes
-    static final String MAGIC_CLASS = "sun/reflect/MagicAccessorImpl";
+    static final String MAGIC_CLASS;
 
     // In JDK 9+ there is no more sun.reflect.MagicAccessorImpl class.
     // Instead there is package private jdk.internal.reflect.MagicAccessorImpl, which is not visible
@@ -66,7 +71,8 @@ public class DelegateGenerator extends BytecodeGenerator {
     // using the bootstrap ClassLoader.
     //   ¯\_(ツ)_/¯
     static {
-        if (JavaInternals.hasModules()) {
+        if (JavaInternals.hasModules() && !USE_INVOKE_DYNAMIC) {
+            MAGIC_CLASS = "sun/reflect/MagicAccessorImpl";
             try {
                 Method m = JavaInternals.getMethod(ClassLoader.class, "defineClass1", ClassLoader.class, String.class,
                         byte[].class, int.class, int.class, ProtectionDomain.class, String.class);
@@ -81,6 +87,8 @@ public class DelegateGenerator extends BytecodeGenerator {
             } catch (Exception e) {
                 throw new IllegalStateException(e);
             }
+        } else {
+            MAGIC_CLASS = "java/lang/Object";
         }
     }
 
@@ -102,7 +110,7 @@ public class DelegateGenerator extends BytecodeGenerator {
             }
         }
         try {
-            return (Delegate) BytecodeGenerator.INSTANCE.defineClass(code)
+            return (Delegate) BytecodeGenerator.INSTANCE.defineClassIn(cls, code)
                     .getDeclaredConstructor(Map.class)
                     .newInstance(fieldsMap);
         } catch (Exception e) {
@@ -115,10 +123,20 @@ public class DelegateGenerator extends BytecodeGenerator {
     }
 
     public static byte[] generate(Class cls, FieldDescriptor[] fds, FieldDescriptor[] defaultFields) {
-        String className = "sun/reflect/Delegate" + index.getAndIncrement() + '_' + cls.getSimpleName();
+        String packageName;
+        {
+            String className = cls.getName();
+            int lastSlash = className.lastIndexOf('.');
+            if (lastSlash == -1) {
+                packageName = "";
+            } else {
+                packageName = className.substring(0, lastSlash + 1).replace('.', '/');
+            }
+        }
+        String className = packageName + "Delegate" + index.getAndIncrement() + '_' + cls.getSimpleName();
 
         ClassWriter cv = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
-        cv.visit(V1_6, ACC_PUBLIC | ACC_FINAL, className, null, MAGIC_CLASS,
+        cv.visit(V1_8, ACC_PUBLIC | ACC_FINAL, className, null, MAGIC_CLASS,
                 new String[]{"one/nio/serial/gen/Delegate"});
 
         generateConstructor(cv, className);
@@ -130,7 +148,15 @@ public class DelegateGenerator extends BytecodeGenerator {
         generateFromJson(cv, cls, fds, defaultFields, className);
 
         cv.visitEnd();
-        return cv.toByteArray();
+        byte[] bytes = cv.toByteArray();
+        if ("sun/reflect/Delegate0_Place".equals(className)) {
+            try {
+                Files.write(Paths.get("F:\\Test.class"), bytes);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        return bytes;
     }
 
     private static void generateConstructor(ClassVisitor cv, String className) {
@@ -248,7 +274,7 @@ public class DelegateGenerator extends BytecodeGenerator {
         mv.visitCode();
 
         mv.visitVarInsn(ALOAD, 1);
-        mv.visitTypeInsn(NEW, Type.getInternalName(cls));
+        emitNewNoInit(mv, cls);
         mv.visitInsn(DUP_X1);
         mv.visitMethodInsn(INVOKEVIRTUAL, "one/nio/serial/DataStream", "register", "(Ljava/lang/Object;)V", false);
 
@@ -429,7 +455,7 @@ public class DelegateGenerator extends BytecodeGenerator {
         mv.visitMethodInsn(INVOKEVIRTUAL, "one/nio/serial/JsonReader", "expect", "(ILjava/lang/String;)V", false);
 
         // Create instance
-        mv.visitTypeInsn(NEW, Type.getInternalName(cls));
+        emitNewNoInit(mv, cls);
 
         // Prepare a multimap (fieldHash -> fds) for lookupswitch
         TreeMap<Integer, FieldDescriptor> fieldHashes = new TreeMap<>();
@@ -591,6 +617,9 @@ public class DelegateGenerator extends BytecodeGenerator {
         emitInt(mv, 'n');
         mv.visitJumpInsn(IF_ICMPNE, notNull);
         mv.visitMethodInsn(INVOKEVIRTUAL, "one/nio/serial/JsonReader", "readNull", "()Ljava/lang/Object;", false);
+        if (USE_INVOKE_DYNAMIC) {
+            mv.visitTypeInsn(CHECKCAST, Type.getInternalName(fieldClass));
+        }
         mv.visitJumpInsn(GOTO, done);
         mv.visitLabel(notNull);
 

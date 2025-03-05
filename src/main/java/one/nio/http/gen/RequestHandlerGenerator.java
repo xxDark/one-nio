@@ -51,7 +51,7 @@ public class RequestHandlerGenerator extends BytecodeGenerator {
         String routerType = Type.getDescriptor(m.getDeclaringClass());
 
         ClassWriter cv = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
-        cv.visit(V1_6, ACC_PUBLIC | ACC_FINAL, className, null, "java/lang/Object",
+        cv.visit(V1_8, ACC_PUBLIC | ACC_FINAL, className, null, "java/lang/Object",
                 new String[] { "one/nio/http/RequestHandler" });
 
         // private final Object router;
